@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta http-equiv="refresh" content="5">
+<title>Poste infirmier - Lab IoMT</title>
+<style>
+  body { font-family: system-ui, sans-serif; background:#0f172a; color:#e2e8f0; margin:0; padding:24px; }
+  h1 { font-size:20px; color:#38bdf8; margin-bottom:4px; }
+  .sub { color:#94a3b8; font-size:13px; margin-bottom:24px; }
+  .grid { display:grid; grid-template-columns: 1fr 1fr 1fr; gap:20px; }
+  .card { background:#1e293b; border-radius:10px; padding:16px; }
+  .card h2 { font-size:15px; margin:0 0 12px 0; color:#cbd5e1; }
+  table { width:100%; border-collapse: collapse; font-size:13px; }
+  th { text-align:left; color:#64748b; font-weight:600; padding:6px 8px; border-bottom:1px solid #334155; }
+  td { padding:6px 8px; border-bottom:1px solid #1e293b; }
+  .badge { padding:2px 8px; border-radius:6px; font-size:11px; font-weight:600; }
+  .b-running{background:#064e3b;color:#6ee7b7;}
+  .b-alarm{background:#7f1d1d;color:#fca5a5;}
+  .b-paused{background:#78350f;color:#fcd34d;}
+  .b-complete{background:#1e3a8a;color:#93c5fd;}
+  .prio-HAUTE{color:#f87171;font-weight:700;}
+  .prio-MOYENNE{color:#fbbf24;}
+  .prio-BASSE{color:#94a3b8;}
+  .empty { color:#475569; font-style:italic; padding:12px; }
+</style>
+</head>
+<body>
+  <h1>Poste infirmier &mdash; supervision perfusions</h1>
+  <div class="sub">Actualisation automatique toutes les 5 secondes</div>
+
+  <div class="grid">
+
+    <div class="card">
+      <h2>Patients</h2>
+      {% if patients %}
+      <table>
+        <thead><tr><th>ID</th><th>Nom</th><th>Chambre</th><th>Statut</th></tr></thead>
+        <tbody>
+          {% for p in patients %}
+          <tr>
+            <td>{{ p.patient_id }}</td>
+            <td>{{ p.first_name }} {{ p.last_name }}</td>
+            <td>{{ p.location or "-" }}</td>
+            <td>{{ p.status or "-" }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      {% else %}
+      <div class="empty">Aucun patient admis.</div>
+      {% endif %}
+    </div>
+
+    <div class="card">
+      <h2>Perfusions en cours</h2>
+      {% if infusions %}
+      <table>
+        <thead><tr><th>Device</th><th>Phase</th><th>Statut</th><th>Debit</th><th>Restant</th><th>Batt.</th></tr></thead>
+        <tbody>
+          {% for i in infusions %}
+          <tr>
+            <td>{{ i.device_id }}</td>
+            <td>{{ i.phase or "-" }}</td>
+            <td>
+              {% set cls = "b-running" %}
+              {% if i.status and i.status.startswith("ALARM") %}{% set cls = "b-alarm" %}
+              {% elif i.status == "PAUSED" %}{% set cls = "b-paused" %}
+              {% elif i.status == "COMPLETE" %}{% set cls = "b-complete" %}
+              {% endif %}
+              <span class="badge {{ cls }}">{{ i.status or "-" }}</span>
+            </td>
+            <td>{{ i.flow_rate_ml_h }} mL/h</td>
+            <td>{{ i.volume_remaining_ml }} mL</td>
+            <td>{{ i.battery_pct }}%</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      {% else %}
+      <div class="empty">Aucune perfusion active.</div>
+      {% endif %}
+    </div>
+
+    <div class="card">
+      <h2>Alarmes recentes</h2>
+      {% if alarms %}
+      <table>
+        <thead><tr><th>Device</th><th>Type</th><th>Priorite</th></tr></thead>
+        <tbody>
+          {% for a in alarms %}
+          <tr>
+            <td>{{ a.device_id }}</td>
+            <td>{{ a.event_type }}</td>
+            <td class="prio-{{ a.priority }}">{{ a.priority or "-" }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      {% else %}
+      <div class="empty">Aucune alarme recente.</div>
+      {% endif %}
+    </div>
+
+  </div>
+</body>
+</html>

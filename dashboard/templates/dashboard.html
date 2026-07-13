@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Poste infirmier — Supervision IoMT</title>
+  <style>
+    :root {
+      --bg:#0f172a; --panel:#1e293b; --line:#334155; --text:#e2e8f0; --muted:#94a3b8;
+      --ok:#22c55e; --warn:#f59e0b; --crit:#ef4444; --info:#3b82f6;
+    }
+    * { box-sizing:border-box; }
+    body { margin:0; font-family:system-ui,sans-serif; background:var(--bg); color:var(--text); }
+    header { padding:16px 24px; border-bottom:1px solid var(--line);
+             display:flex; align-items:center; justify-content:space-between; }
+    header h1 { font-size:18px; margin:0; font-weight:600; }
+    .tick { font-size:11px; color:var(--muted); }
+    main { padding:24px; display:grid; gap:24px; grid-template-columns:2fr 1fr; }
+    @media (max-width:900px){ main{grid-template-columns:1fr;} }
+    h2 { font-size:13px; text-transform:uppercase; letter-spacing:.05em; color:var(--muted); margin:0 0 12px; }
+    .card { background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:16px; margin-bottom:14px; }
+    .row { display:flex; justify-content:space-between; align-items:baseline; }
+    .device { font-weight:600; font-size:15px; }
+    .status { font-size:12px; padding:2px 8px; border-radius:6px; font-weight:600; }
+    .status.RUNNING { background:rgba(34,197,94,.15); color:var(--ok); }
+    .status.PAUSED  { background:rgba(59,130,246,.15); color:var(--info); }
+    .status.COMPLETE{ background:rgba(148,163,184,.15); color:var(--muted); }
+    .status.ALARM   { background:rgba(239,68,68,.15); color:var(--crit); }
+    .metrics { display:grid; grid-template-columns:repeat(4,1fr); gap:10px; margin-top:12px; }
+    .metric { background:rgba(0,0,0,.2); border-radius:8px; padding:8px 10px; }
+    .metric .label { font-size:10px; color:var(--muted); text-transform:uppercase; }
+    .metric .value { font-size:16px; font-weight:600; margin-top:2px; }
+    .value.danger { color:var(--crit); }
+    .alarm { border-left:3px solid var(--warn); padding:8px 12px; margin-bottom:8px;
+             background:rgba(0,0,0,.15); border-radius:0 8px 8px 0; }
+    .alarm.HAUTE { border-color:var(--crit); }
+    .alarm.MOYENNE { border-color:var(--warn); }
+    .alarm.BASSE { border-color:var(--info); }
+    .alarm .t { font-size:11px; color:var(--muted); }
+    .empty { color:var(--muted); font-size:14px; padding:20px; text-align:center; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>🏥 Poste infirmier — Supervision des perfusions</h1>
+    <span class="tick" id="tick">—</span>
+  </header>
+  <main>
+    <section>
+      <h2>Perfusions en cours</h2>
+      <div id="infusions"><div class="empty">Chargement…</div></div>
+    </section>
+    <section>
+      <h2>Alarmes & évènements récents</h2>
+      <div id="alarms"><div class="empty">Chargement…</div></div>
+    </section>
+  </main>
+
+  <script>
+    const RATE_ALERT = 100; // débit au-delà duquel on affiche en rouge (utile pour la phase attaque)
+
+    function statusClass(s){ if(!s) return ''; return s.startsWith('ALARM') ? 'ALARM' : s; }
+
+    async function refresh(){
+      try {
+        const [inf, alarms] = await Promise.all([
+          fetch('/data/infusions').then(r=>r.json()),
+          fetch('/data/alarms').then(r=>r.json()),
+        ]);
+        renderInfusions(inf);
+        renderAlarms(alarms);
+        document.getElementById('tick').textContent = 'MàJ ' + new Date().toLocaleTimeString('fr-FR');
+      } catch(e) {}
+    }
+
+    function renderInfusions(list){
+      const el = document.getElementById('infusions');
+      if(!list || list.length===0){ el.innerHTML='<div class="empty">Aucune perfusion active.</div>'; return; }
+      el.innerHTML = list.map(o=>{
+        const rate = o.flow_rate_ml_h ?? 0;
+        const danger = rate >= RATE_ALERT ? ' danger' : '';
+        const sc = statusClass(o.status);
+        return `
+          <div class="card">
+            <div class="row">
+              <span class="device">${o.device_id} — ${o.patient_id ?? 'N/A'}</span>
+              <span class="status ${sc}">${o.status ?? '—'}</span>
+            </div>
+            <div class="metrics">
+              <div class="metric"><div class="label">Phase</div><div class="value">${o.phase ?? '—'}</div></div>
+              <div class="metric"><div class="label">Débit mL/h</div><div class="value${danger}">${rate.toFixed(1)}</div></div>
+              <div class="metric"><div class="label">Restant mL</div><div class="value">${(o.volume_remaining_ml ?? 0).toFixed(0)}</div></div>
+              <div class="metric"><div class="label">Batterie</div><div class="value">${(o.battery_pct ?? 0).toFixed(0)}%</div></div>
+            </div>
+          </div>`;
+      }).join('');
+    }
+
+    function renderAlarms(list){
+      const el = document.getElementById('alarms');
+      if(!list || list.length===0){ el.innerHTML='<div class="empty">Aucune alarme.</div>'; return; }
+      el.innerHTML = list.map(a=>`
+        <div class="alarm ${a.priority ?? ''}">
+          <div>${a.event_type} <span class="t">(${a.priority ?? '—'})</span></div>
+          <div class="t">${a.device_id} · ${a.patient_id ?? ''} · ${a.created_at ?? ''}</div>
+        </div>`).join('');
+    }
+
+    refresh();
+    setInterval(refresh, 3000);
+  </script>
+</body>
+</html>
