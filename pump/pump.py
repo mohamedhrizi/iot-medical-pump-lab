@@ -38,6 +38,9 @@ ALARM_PRIORITY = {
     "ALARM_LOW_VOLUME": "MOYENNE",
     "ALARM_LOW_BATTERY": "MOYENNE",
     "ALARM_AC_DISCONNECTED": "BASSE",
+    # New dosage-related alarm priorities
+    "ALARM_OVERDOSE": "HAUTE",
+    "ALARM_LOW_DOSE": "MOYENNE",
 }
 
 logging.basicConfig(
@@ -122,16 +125,9 @@ class PumpState:
         rate = self.current_target_rate()
         jitter = 1.0 + random.uniform(-FLOW_JITTER_PCT, FLOW_JITTER_PCT)
         self.volume_infused_ml += rate * jitter * simulated / 3600.0
-        if self.alarms_enabled and self.phase in ("DOSE_CHARGE", "ENTRETIEN"):
-            if random.random() < PROB_OCCLUSION:
-                self.status = "ALARM_OCCLUSION"
-                return
-            if random.random() < PROB_AIR_IN_LINE:
-                self.status = "ALARM_AIR_IN_LINE"
-                return
-            if random.random() < PROB_NURSE_PAUSE:
-                self.status = "PAUSED"
-                return
+
+        # Random background alarms have been removed: alarms are now only triggered by state or explicit commands.
+        # Keep battery-driven alarm logic.
         if self.alarms_enabled and self.battery_pct <= 15 and not self.ac_connected:
             self.status = "ALARM_LOW_BATTERY"
             return
@@ -195,7 +191,8 @@ def build_hl7_oru(state, device):
         f"OBX|7|ST|STATUS^Device Status||{state.status}||||||F",
         f"OBX|8|ST|ALARM_PRIO^Alarm Priority||{priority}||||||F",
         f"OBX|9|NM|BATTERY^Battery Level||{state.battery_pct:.0f}|%|||||F",
-        f"OBX|10|ST|AC_POWER^AC Power Connected||{'YES' if state.ac_connected else 'NO'}||||||F",
+        # AC_POWER should reflect the actual supply state in a clinical token
+        f"OBX|10|ST|AC_POWER^AC Power Connected||{'AC' if state.ac_connected else 'BATTERY'}||||||F",
     ]
     return "\r".join(segments) + "\r"
 
@@ -221,6 +218,46 @@ def apply_command(state, lock, command, src_ip):
                 return "ERR|valeur invalide"
 
             old = state.flow_rate_ml_h
+
+            # Dosage safety checks (clinical band)
+            LOW_RATE_THRESHOLD = 5.0
+            HIGH_RATE_THRESHOLD = 200.0
+
+            if state.alarms_enabled:
+                if new_rate > HIGH_RATE_THRESHOLD:
+                    state.status = "ALARM_OVERDOSE"
+                    audit(
+                        "pump.command",
+                        component="pump",
+                        src_ip=src_ip,
+                        device_id="PUMP-IOMT-01",
+                        patient_id=state.patient_id,
+                        command="SET_RATE",
+                        old_rate=old,
+                        new_rate=new_rate,
+                        alarm="ALARM_OVERDOSE",
+                    )
+                    logger.warning("ALARM_OVERDOSE déclenchée par SET_RATE de %s : %.1f mL/h", src_ip, new_rate)
+                elif new_rate < LOW_RATE_THRESHOLD:
+                    state.status = "ALARM_LOW_DOSE"
+                    audit(
+                        "pump.command",
+                        component="pump",
+                        src_ip=src_ip,
+                        device_id="PUMP-IOMT-01",
+                        patient_id=state.patient_id,
+                        command="SET_RATE",
+                        old_rate=old,
+                        new_rate=new_rate,
+                        alarm="ALARM_LOW_DOSE",
+                    )
+                    logger.warning("ALARM_LOW_DOSE déclenchée par SET_RATE de %s : %.1f mL/h", src_ip, new_rate)
+                else:
+                    # if a dose-related alarm was active, clear it
+                    if state.status in ("ALARM_OVERDOSE", "ALARM_LOW_DOSE"):
+                        state.status = "RUNNING"
+
+            # apply the new rate
             state.flow_rate_ml_h = new_rate
 
             audit(
