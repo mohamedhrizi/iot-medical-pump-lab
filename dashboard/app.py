@@ -7,9 +7,9 @@ relaient l'API REST côté serveur. Ce proxy évite les soucis CORS.
 import json
 import urllib.request
 import urllib.parse
-from flask import Flask, render_template, jsonify
+from flask import Flask, render_template, jsonify, request
 
-from config.settings import API_BASE_URL, DASHBOARD_HOST, DASHBOARD_PORT
+from config.settings import API_BASE_URL, DASHBOARD_HOST, DASHBOARD_PORT, PUMP_CMD_HOST, PUMP_CMD_PORT
 
 app = Flask(__name__)
 
@@ -23,6 +23,17 @@ def _api_get(path, params=None):
             return json.loads(resp.read().decode("utf-8"))
     except Exception:
         return []
+
+
+def _send_pump_command(command, timeout=3):
+    import socket
+    try:
+        with socket.create_connection((PUMP_CMD_HOST, PUMP_CMD_PORT), timeout=timeout) as s:
+            s.sendall((command + "\n").encode("utf-8"))
+            resp = s.recv(1024).decode("utf-8", errors="replace").strip()
+            return {"ok": True, "response": resp}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
 
 
 @app.route("/")
@@ -43,6 +54,13 @@ def data_alarms():
 @app.route("/data/patients")
 def data_patients():
     return jsonify(_api_get("/api/patients"))
+
+
+@app.route("/data/set_rate", methods=["POST"])
+def set_rate():
+    rate = request.json.get("rate")
+    result = _send_pump_command(f"SET_RATE|{rate}")
+    return jsonify(result)
 
 
 def main():
