@@ -38,6 +38,11 @@
     .alarm.BASSE { border-color:var(--info); }
     .alarm .t { font-size:11px; color:var(--muted); }
     .empty { color:var(--muted); font-size:14px; padding:20px; text-align:center; }
+
+    /* HMI control styles */
+    .hmi-control { margin-top:10px; display:flex; gap:8px; }
+    .hmi-control input { flex:1; background:rgba(0,0,0,.2); border:1px solid var(--line); color:var(--text); border-radius:6px; padding:6px 8px; }
+    .hmi-control button { background:var(--info); border:none; color:white; border-radius:6px; padding:6px 12px; cursor:pointer; font-weight:600; }
   </style>
 </head>
 <body>
@@ -80,6 +85,8 @@
         const rate = o.flow_rate_ml_h ?? 0;
         const danger = rate >= RATE_ALERT ? ' danger' : '';
         const sc = statusClass(o.status);
+        // Use device-specific input id to avoid duplicates when multiple cards are rendered.
+        const inputId = 'rate-input-' + (o.device_id ?? Math.random().toString(36).slice(2,8));
         return `
           <div class="card">
             <div class="row">
@@ -91,6 +98,11 @@
               <div class="metric"><div class="label">Débit mL/h</div><div class="value${danger}">${rate.toFixed(1)}</div></div>
               <div class="metric"><div class="label">Restant mL</div><div class="value">${(o.volume_remaining_ml ?? 0).toFixed(0)}</div></div>
               <div class="metric"><div class="label">Batterie</div><div class="value">${(o.battery_pct ?? 0).toFixed(0)}%</div></div>
+            </div>
+
+            <div class="hmi-control">
+              <input type="number" id="${inputId}" placeholder="Nouveau débit" step="1" min="0">
+              <button onclick="setRate('${inputId}', '${o.device_id ?? ''}')">Appliquer</button>
             </div>
           </div>`;
       }).join('');
@@ -104,6 +116,30 @@
           <div>${a.event_type} <span class="t">(${a.priority ?? '—'})</span></div>
           <div class="t">${a.device_id} · ${a.patient_id ?? ''} · ${a.created_at ?? ''}</div>
         </div>`).join('');
+    }
+
+    // Send rate to dashboard endpoint. deviceId is optional; backend currently forwards a simple SET_RATE|{rate}.
+    async function setRate(inputId, deviceId) {
+      const input = document.getElementById(inputId);
+      if(!input) return;
+      const val = parseFloat(input.value);
+      if (isNaN(val)) return;
+      // You may want to include deviceId in the body if your pump command expects it.
+      const body = { rate: val };
+      if (deviceId) body.device_id = deviceId;
+      try {
+        const res = await fetch('/data/set_rate', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify(body)
+        });
+        const data = await res.json();
+        console.log(data);
+      } catch(e) {
+        console.error('setRate failed', e);
+      } finally {
+        input.value = '';
+      }
     }
 
     refresh();
