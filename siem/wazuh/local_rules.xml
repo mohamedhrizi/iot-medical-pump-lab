@@ -1,0 +1,135 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+Wazuh Local Rules for IoMT Infusion Pump Security Monitoring
+
+Rule Hierarchy:
+100100 - Parent: All IoMT audit events
+  100110 - All pump.command events
+    100111 - SET_RATE command (Level 10, T0836, T0831)
+    100112 - DISABLE_ALARM command (Level 13, T0878)
+    100113 - STOP command (Level 12, T0813)
+  100120 - pump.command_rejected (Level 8, T0855)
+
+Schema:
+  event: IoMT event type (pump.command, pump.command_rejected)
+  component: Source component (pump)
+  src_ip: Source IP address
+  command: Command name (SET_RATE, PAUSE, RESUME, DISABLE_ALARM, STOP, ENABLE_ALARM)
+  reason: Rejection reason (valeur_invalide, commande_inconnue)
+  device_id: Device identifier
+  patient_id: Patient identifier
+  severity: Risk level (critical, high, medium, low)
+  old_rate: Previous flow rate (for SET_RATE)
+  new_rate: New flow rate (for SET_RATE)
+  raw: Raw input value (for rejected commands)
+
+MITRE ATT&CK Mappings:
+  T0836 - Modify Program State (ICS - Modify Device State)
+  T0831 - Change Operating State (ICS - Manipulate I/O Image)
+  T0878 - Alarm Suppression (ICS - Inhibit Response Function)
+  T0813 - Shutdown/Restart (ICS - Stop and Restart)
+  T0855 - Unauthorized Command Message (ICS - Manipulate Control Logic)
+-->
+
+<group name="iomt_pump_security,">
+
+  <!-- Rule 100100: Parent rule for all IoMT audit events -->
+  <rule id="100100" level="0" noalert="1">
+    <match>pump|receiver|api|generator</match>
+    <field name="component">pump|receiver|api|generator</field>
+    <description>IoMT audit event detected</description>
+  </rule>
+
+  <!-- Rule 100110: All pump.command events (parent for specific commands) -->
+  <rule id="100110" level="5" parent="100100">
+    <field name="event">pump.command</field>
+    <description>Pump command executed: $(command)</description>
+    <mitre>
+      <id>T0834</id>
+    </mitre>
+  </rule>
+
+  <!-- Rule 100111: SET_RATE command (MITRE T0836, T0831) -->
+  <!-- Level 10 - Device state manipulation, potential for dose override -->
+  <rule id="100111" level="10" parent="100110">
+    <field name="command">SET_RATE</field>
+    <description>CRITICAL: Flow rate modification command executed from $(src_ip) - old_rate=$(old_rate) mL/h -> new_rate=$(new_rate) mL/h [Device: $(device_id), Patient: $(patient_id)]</description>
+    <mitre>
+      <id>T0836</id>
+      <id>T0831</id>
+    </mitre>
+  </rule>
+
+  <!-- Rule 100112: DISABLE_ALARM command (MITRE T0878) -->
+  <!-- Level 13 - Critical safety function inhibition -->
+  <rule id="100112" level="13" parent="100110">
+    <field name="command">DISABLE_ALARM</field>
+    <description>CRITICAL SECURITY EVENT: Alarm suppression executed from $(src_ip) - Safety monitoring DISABLED [Device: $(device_id), Patient: $(patient_id)]</description>
+    <options>alert_by_email</options>
+    <mitre>
+      <id>T0878</id>
+    </mitre>
+  </rule>
+
+  <!-- Rule 100113: STOP command (MITRE T0813) -->
+  <!-- Level 12 - Device shutdown, potential for treatment interruption -->
+  <rule id="100113" level="12" parent="100110">
+    <field name="command">STOP</field>
+    <description>CRITICAL: Device stop command executed from $(src_ip) - Pump halted [Device: $(device_id), Patient: $(patient_id)]</description>
+    <mitre>
+      <id>T0813</id>
+    </mitre>
+  </rule>
+
+  <!-- Rule 100114: PAUSE command (informational) -->
+  <!-- Level 3 - Routine operational pause -->
+  <rule id="100114" level="3" parent="100110">
+    <field name="command">PAUSE</field>
+    <description>Pump pause command from $(src_ip) [Device: $(device_id), Patient: $(patient_id)]</description>
+  </rule>
+
+  <!-- Rule 100115: RESUME command (informational) -->
+  <!-- Level 3 - Routine operational resume -->
+  <rule id="100115" level="3" parent="100110">
+    <field name="command">RESUME</field>
+    <description>Pump resume command from $(src_ip) [Device: $(device_id), Patient: $(patient_id)]</description>
+  </rule>
+
+  <!-- Rule 100116: ENABLE_ALARM command (informational) -->
+  <!-- Level 3 - Routine alarm re-enablement -->
+  <rule id="100116" level="3" parent="100110">
+    <field name="command">ENABLE_ALARM</field>
+    <description>Alarm re-enabled from $(src_ip) [Device: $(device_id), Patient: $(patient_id)]</description>
+  </rule>
+
+  <!-- Rule 100120: Pump command rejected (MITRE T0855) -->
+  <!-- Level 8 - Potential attack signature (malformed commands) -->
+  <rule id="100120" level="8" parent="100100">
+    <field name="event">pump.command_rejected</field>
+    <description>Pump command REJECTED from $(src_ip) - command=$(command) reason=$(reason)</description>
+    <mitre>
+      <id>T0855</id>
+    </mitre>
+  </rule>
+
+  <!-- Rule 100121: Multiple command rejections (possible fuzzing/attack) -->
+  <!-- Level 11 - Pattern detection for suspicious activity -->
+  <rule id="100121" level="11" frequency="5" timeframe="60" parent="100120">
+    <same_source_ip />
+    <description>Multiple pump commands REJECTED from $(src_ip) within 60 seconds - Possible fuzzing or attack attempt</description>
+    <mitre>
+      <id>T0855</id>
+    </mitre>
+  </rule>
+
+  <!-- Rule 100130: Unauthorized source IP attempting commands -->
+  <!-- Level 9 - Commands from unexpected network segments -->
+  <rule id="100130" level="9" parent="100110">
+    <field name="src_ip">^(?!127\.0\.0\.1$).*</field>
+    <description>Pump command from non-localhost source: $(src_ip) - command=$(command) [Device: $(device_id)]</description>
+    <mitre>
+      <id>T0834</id>
+    </mitre>
+  </rule>
+
+</group>
