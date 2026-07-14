@@ -63,6 +63,27 @@ def set_rate():
     return jsonify(result)
 
 
+@app.route("/data/command", methods=["POST"])
+def command():
+    """Accept {verb, args} JSON and forward to pump command channel."""
+    data = request.json or {}
+    verb = data.get("verb")
+    args = data.get("args", [])
+    
+    if not verb:
+        return jsonify({"ok": False, "error": "Missing 'verb' field"}), 400
+    
+    # Build command string: VERB|arg1|arg2|...
+    if args:
+        cmd_parts = [verb] + [str(a) for a in args]
+        command_str = "|".join(cmd_parts)
+    else:
+        command_str = verb
+    
+    result = _send_pump_command(command_str)
+    return jsonify(result)
+
+
 def main():
     app.run(host=DASHBOARD_HOST, port=DASHBOARD_PORT, debug=False)
 
