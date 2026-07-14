@@ -84,6 +84,10 @@
     <!-- Alarms side-panel removed: per-pump alarms shown on the 3D card -->
   </main>
 
+  <!-- Include Three.js and the pump3d module so the inline script below can initialize the scene -->
+  <script src="https://unpkg.com/three@0.154.0/build/three.min.js"></script>
+  <script src="/static/js/pump3d.js"></script>
+
   <script>
     const RATE_ALERT = 100; // débit au-delà duquel on affiche en rouge (utile pour la phase attaque)
 
@@ -156,34 +160,61 @@
       }
     }
 
-    // Wire the 3D card controls
+    // Wire the 3D card controls and init 3D once pump3d module is present
     document.addEventListener('DOMContentLoaded', function () {
-      // Initialize Pump3D if available
-      try { window.Pump3D = createPump3D(document.getElementById('pump3d-container')); } catch(e) { console.warn('Pump3D init failed', e); }
+      function bindControls() {
+        const setBtn = document.getElementById('set-rate-btn');
+        if (setBtn) {
+          setBtn.addEventListener('click', async () => {
+            const rate = parseFloat(document.getElementById('set-rate').value);
+            if (!Number.isFinite(rate)) return;
+            await fetch('/data/command', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ verb: 'SET_RATE', args: [rate] })
+            });
+            document.getElementById('set-rate').value = '';
+          });
+        }
 
-      document.getElementById('set-rate-btn').addEventListener('click', async () => {
-        const rate = parseFloat(document.getElementById('set-rate').value);
-        if (!Number.isFinite(rate)) return;
-        await fetch('/data/command', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ verb: 'SET_RATE', args: [rate] })
-        });
-        document.getElementById('set-rate').value = '';
-      });
+        const alarmBtn = document.getElementById('alarm-toggle');
+        if (alarmBtn) {
+          alarmBtn.addEventListener('click', async (ev) => {
+            const btn = ev.currentTarget;
+            const enabled = btn.getAttribute('data-enabled') === 'true';
+            const verb = enabled ? 'DISABLE_ALARM' : 'ENABLE_ALARM';
+            await fetch('/data/command', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ verb })
+            });
+            btn.setAttribute('data-enabled', (!enabled).toString());
+            btn.textContent = enabled ? 'Enable alarms' : 'Disable alarms';
+          });
+        }
+      }
 
-      document.getElementById('alarm-toggle').addEventListener('click', async (ev) => {
-        const btn = ev.currentTarget;
-        const enabled = btn.getAttribute('data-enabled') === 'true';
-        const verb = enabled ? 'DISABLE_ALARM' : 'ENABLE_ALARM';
-        await fetch('/data/command', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ verb })
-        });
-        btn.setAttribute('data-enabled', (!enabled).toString());
-        btn.textContent = enabled ? 'Enable alarms' : 'Disable alarms';
-      });
+      function initWhenReady(attempts) {
+        attempts = attempts || 0;
+        if (typeof createPump3D === 'function') {
+          try {
+            window.Pump3D = createPump3D(document.getElementById('pump3d-container'));
+            console.info('Pump3D initialized');
+          } catch (e) {
+            console.warn('Pump3D init failed', e);
+            const c = document.getElementById('pump3d-container'); if (c) c.textContent = '3D init failed';
+          }
+          bindControls();
+        } else if (attempts < 10) {
+          setTimeout(()=>initWhenReady(attempts+1), 200);
+        } else {
+          console.error('Pump3D module not available after retries');
+          const c = document.getElementById('pump3d-container'); if (c) c.textContent = '3D module not loaded';
+          bindControls();
+        }
+      }
+
+      initWhenReady(0);
     });
 
     refresh();
